@@ -45,6 +45,8 @@ Give it a topic (or point it at a PDF/URL) and it will:
 
 A motion/pacing **QA** pass (ffmpeg `freezedetect` × the word timeline) flags visual dead air and weak pacing.
 
+**PDF → video profiles.** Point it at a textbook chapter or paper and pick a style: **BRAINROT** (9:16 TikTok-style study short) or **EDUCATIONAL** (16:9 lesson with exact equations, page references and claim checks). See **[skills/explainer/README.md](skills/explainer/README.md)**.
+
 ## How it's built
 
 - **Local & free stack:** Kokoro-82M (TTS) · torchaudio MMS_FA (alignment) · plain HTML + a seeded JS animation driver · Playwright frame capture · ffmpeg/VideoToolbox. The only "AI service" is the operator's **existing Claude subscription** — no metered API key.

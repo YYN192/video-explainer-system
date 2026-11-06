@@ -17,18 +17,28 @@ def run(proj):
     lex = lexicon.load(proj.dir, (proj.brand or {}).get("lexicon"))
     from kokoro import KPipeline
     t0 = time.time()
-    pipe = KPipeline(lang_code="a")
+    # PDF profiles (PRD §19): narration language, speed and inter-segment gap come from
+    # project.json; absent -> the original defaults (American English, speed 1, 0.18 s).
+    from ..profiles import language
+    lang_code, lang = language(proj.data.get("language", "en-us"))
+    if not lang:
+        raise ValueError(f"unsupported narration language {proj.data.get('language')!r}")
+    english = lang_code.startswith("en")
+    speed = float(proj.data.get("speech_speed", 1.0))
+    gap_s = float(proj.data.get("segment_gap", GAP))
+    pipe = KPipeline(lang_code=lang["kokoro"], repo_id="hexgrad/Kokoro-82M")
     load_s = time.time() - t0
 
     segments = effective_segments(proj, script)
 
-    gap = np.zeros(int(SR * GAP), dtype=np.float32)
+    gap = np.zeros(int(SR * gap_s), dtype=np.float32)
     full, segs, cursor, synth_s = [], [], 0.0, 0.0
     for seg in segments:
         ts = time.time()
-        spoken = lexicon.spoken_text(seg["text"], lex)  # expand acronyms for TTS only
+        # expand acronyms for TTS only (the lexicon is English; other languages speak as written)
+        spoken = lexicon.spoken_text(seg["text"], lex) if english else seg["text"]
         chunks = []
-        for _, _, audio in pipe(spoken, voice=proj.voice, speed=1):
+        for _, _, audio in pipe(spoken, voice=proj.voice, speed=speed):
             a = audio.detach().cpu().numpy() if hasattr(audio, "detach") else np.asarray(audio)
             chunks.append(a.astype(np.float32))
         synth_s += time.time() - ts
@@ -36,7 +46,7 @@ def run(proj):
         dur = len(seg_audio) / SR
         segs.append({"id": seg["id"], "slide": seg["slide"], "text": seg["text"],
                      "start": round(cursor, 4), "end": round(cursor + dur, 4)})
-        full.append(seg_audio); full.append(gap); cursor += dur + GAP
+        full.append(seg_audio); full.append(gap); cursor += dur + gap_s
 
     narration = np.concatenate(full)
     raw = proj.work / "narration_raw.wav"

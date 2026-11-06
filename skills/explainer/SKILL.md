@@ -7,8 +7,11 @@ description: >-
   Use when the user wants to "make an explainer video", "turn this into a Short/
   Reel/TikTok", "create an explainer deck", or "/explainer <topic>". Supports
   topic-only OR source-driven (ingest a PDF/URL and frame a real figure/screenshot);
-  aspects 9:16, 16:9, 4:5; fixed theme. Generation only — it writes a labeled output
-  dir + manifest.json; it does NOT post to social platforms.
+  aspects 9:16, 16:9, 4:5; fixed theme. Also turns a PDF (textbook chapter, paper, page
+  range) into either a BRAINROT TikTok-style study short (9:16, 45–90s) or an EDUCATIONAL
+  lecture video (16:9, 4–8 min) with exact equations, page references and claim checks.
+  Generation only — it writes a labeled output dir + manifest.json; it does NOT post to
+  social platforms.
 ---
 
 # /explainer
@@ -31,6 +34,9 @@ calls**; once the JSON exists, it renders unattended.
   `PYTHONPATH=<repo>/src python -m explainer.cli`.
 - Shell discipline (CLAUDE.md): the `media` command is **synchronous — run it in the
   foreground and let it finish** (~50s for a ~20s video). No polling, no backgrounding.
+
+> **Given a PDF?** Follow **[PDF → video (profiles)](#pdf--video-profiles-brainrot--educational)**
+> below instead of the generic steps.
 
 ## Steps
 
@@ -288,6 +294,95 @@ does. Be a **coach** through this loop — keep it seamless, no external apps:
 
 The tool can also run **fully end-to-end** with Kokoro (`--voice-source kokoro`, default) — give it a
 topic and it returns a finished video. Voiceover mode is the **interactive, co-built** tier.
+
+## PDF → video (profiles: BRAINROT · EDUCATIONAL)
+
+Two reusable production profiles turn a PDF (or a page range) into a finished MP4. Read the
+style guide for the chosen profile **before writing anything**:
+**[BRAINROT_STYLE.md](BRAINROT_STYLE.md)** · **[EDUCATIONAL_STYLE.md](EDUCATIONAL_STYLE.md)**.
+
+### P1. Intake — ask only what's missing
+If the user gave a PDF but **no style**, ask once (AskUserQuestion): **BRAINROT** (9:16 TikTok-style
+study short, 45–90 s, fast + memes + SFX) or **EDUCATIONAL** (16:9 lesson, 4–8 min, equations,
+page references). Everything else has a default — don't ask about it unless the user raised it:
+
+| option | flag | default |
+|---|---|---|
+| style | `--profile brainrot\|educational` | *(ask)* |
+| duration | `--duration 60` · `45-90` · `4-8m` | profile window |
+| aspect | `--aspect` | 9:16 / 16:9 |
+| page range | `ingest --pages "12-15"` | first 4 pages |
+| language | `--language en-us\|en-gb\|es\|fr\|it\|pt-br` | en-us |
+| voice | `--voice <kokoro voice>` | am_puck / bm_george (or the language's default) |
+| licensed footage / music | `--bg-video` / `--music` | none (original animated bg) |
+
+Narration languages are the Latin-script Kokoro languages above. **Bulgarian (and other
+unsupported languages) can't be narrated** — a Bulgarian PDF is fine as *input*: explain it in a
+supported language, keep equations exactly as printed, and tell the user.
+
+### P2. Scaffold + ingest
+```
+explainer scaffold "<slug>" --title "<title>" --profile educational [--duration 4-8m] [--language en-gb]
+explainer ingest <project_dir> --pdf <path> --pages "12-15"
+```
+Ingest writes `sources/<sid>_pages.json` (per-page text, 1-based page numbers), page renders,
+**hi-res crops of every equation-looking line** (`*_pNN_eqNN.png`) and **figure regions**
+(`*_pNN_figNN.png` — boxed text regions show up here too; pick the real figures).
+
+### P3. Read the source — text AND images
+Read `pages.json` for the wording and **look at the page renders / equation crops** (Read tool)
+for the maths: text extraction loses sub/superscripts (`5 × 10−7` is really 5 × 10⁻⁷). Identify
+the central concepts and the order the source builds them in.
+
+### P4. Author (generation stage — JSON only)
+- **`equations.json`** — every formula you'll show, transcribed from the crops:
+  `{"equations":[{"id":"e1","page":12,"crop":"sources/src1_p12_eq01.png","latex":"v = f\\lambda","verified":false}]}`.
+  A formula not in the PDF needs `"supplement": true` (and can't be used in a `derivation`).
+- **`claims.json`** — every factual claim: `{"id","slide","kind":"source","page":N,"quote":"<verbatim
+  words from that page>"}` or `{"id","slide","kind":"supplement","text":"…"}`.
+- **`script.json` + `deck.json`** — as in step 4, plus the PDF devices `equation` · `derivation` ·
+  `scene2d` · `meme` and the `claim`/`page` badge fields
+  ([docs/visual-devices.md](../../docs/visual-devices.md#pdf-profile-devices)). Narration speaks
+  maths in words — no `=`, `λ`, `^`, `½` in `script.json`.
+
+### P5. Verify equations, then gate
+```
+explainer eqsheet <project_dir>     # review/equations.png: PDF crop | rendered LaTeX | source
+```
+Read `review/equations.png`; for each row that matches the PDF **exactly**, set `"verified": true`.
+Then run the gate:
+```
+explainer check <project_dir> --audio
+```
+It verifies every `source` quote really occurs on its cited page (wrong page → tells you the right
+one), that every on-screen formula is a verified registry entry, that derivations use only source
+steps, that narration has no raw symbols, flags technical words missing from the pronunciation
+dictionary (with phonemes + `review/pronunciation.wav` to listen to), and checks duration, hook
+length, shot length and device variety against the profile. **Fix every error.** Fix warnings or
+say why not.
+
+### P6. Review checkpoint (unless `--yes`)
+Show the user `review/outline.md` (storyboard + full script + equations + pronunciation list) and
+ask for corrections. Re-run `check` after edits. A wrong pronunciation is fixed with
+`<project>/lexicon.json` (`{"term": "respelling"}`).
+
+### P7. Preview, render, verify
+Cheap preview first (catches layout bugs before a multi-minute render):
+```
+explainer media <project_dir> --only narrate,align,deck
+explainer stills <project_dir>       # one PNG per slide — inspect them
+```
+Then the full render (synchronous; ~1.3–1.7× real time):
+```
+explainer media <project_dir>        # … → qa → verify (automatic for profile runs)
+```
+`verify` checks the MP4 (video + audio streams, durations agree), caption/audio sync (caption
+words on speech not silence, monotonic cues), the equation render report (any LaTeX error,
+zero-size or off-screen formula fails), extracts **one frame per slide from the final MP4** +
+`review/contact_<aspect>.png`, and saves `script/`, `storyboard/`, `captions/`, `video/`.
+**Read the contact sheet and the equation frames** (`inspect_math_frames` in
+`review/verify.json`) before reporting — check for clipped/missing/distorted equations, wrong
+units, overlapping labels. Report the MP4, the deck, and any warnings you didn't fix.
 
 ## Out of scope (current phase)
 Music *beat-sync*, operator `--interview` voice capture, **C2PA embedding** (needs c2patool +

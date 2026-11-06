@@ -46,15 +46,185 @@
     eln.textContent = fmtStat(info.num * Math.max(0, Math.min(1, g)), info);
   }
 
-  // intro transition styles (theme motion personality + per-slide override, PRD §8.4)
-  function introTransform(style, p) {
+  function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+  function backOut(x) { x = clamp01(x); var c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); }
+  // deterministic per-frame noise (glitch jitter) — a hash of the frame index, never wall-clock
+  function hashNoise(n) { var x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+
+  // intro transition styles (theme motion personality + per-slide override, PRD §8.4).
+  // p = eased progress 0..1, raw = linear progress, t = absolute time (for glitch jitter).
+  function introTransform(style, p, raw, t) {
+    var vw = window.innerWidth, vh = window.innerHeight;
     switch (style) {
       case 'fade':  return 'translateY(0)';
       case 'pop':   return 'scale(' + (0.92 + 0.08 * p) + ')';
       case 'slide': return 'translateX(' + ((1 - p) * -70) + 'px)';
+      // --- energetic set (BRAINROT profile) ---
+      case 'zoom':  return 'scale(' + (1.55 - 0.55 * backOut(raw)).toFixed(4) + ')';
+      case 'spin':  return 'rotate(' + ((1 - p) * -28).toFixed(2) + 'deg) scale(' + (0.6 + 0.4 * backOut(raw)).toFixed(4) + ')';
+      case 'whip':  return 'translateX(' + ((1 - p) * vw * 1.1).toFixed(1) + 'px) skewX(' + ((1 - p) * -18).toFixed(2) + 'deg)';
+      case 'drop':  return 'translateY(' + ((1 - backOut(raw)) * -vh * 0.55).toFixed(1) + 'px)';
+      case 'glitch':
+        if (raw >= 1) return 'translate(0,0)';
+        var n = Math.floor(t * 30), a = (1 - raw) * 34;
+        return 'translate(' + ((hashNoise(n) - 0.5) * a).toFixed(1) + 'px,' + ((hashNoise(n + 7) - 0.5) * a * 0.5).toFixed(1) +
+          'px) skewX(' + ((hashNoise(n + 3) - 0.5) * (1 - raw) * 16).toFixed(2) + 'deg)';
+      case 'wipe':  return 'translateY(0)';  // the wipe itself is a clip-path, set in renderAt
       case 'rise':
       default:      return 'translateY(' + ((1 - p) * 40) + 'px)';
     }
+  }
+
+  // --- math (EDUCATIONAL + any deck with equations): LaTeX placeholders typeset by the
+  // vendored MathJax 3 (SVG output, no fonts, no network) once at load — before
+  // __deckReady — so every captured frame shows finished SVG. Never typeset per frame.
+  var TEX = [];
+  function texSpan(tex, display) {
+    TEX.push({ tex: String(tex || ''), display: !!display });
+    return '<span class="tex" data-ti="' + (TEX.length - 1) + '"></span>';
+  }
+  function attrEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+  function cueAttr(cue) { return cue ? ' data-cue="' + attrEsc(cue) + '"' : ''; }
+
+  // --- scene2d: a small declarative SVG vocabulary (lines, arrows, circles, paths, labels,
+  // math labels, travelling waves, moving wavefronts). Authored as JSON data, drawn on /
+  // animated by renderAt(t). Coordinates are in the slide's viewBox units (default 1600x900).
+  var SCENES = {};
+  function colorOf(c) {
+    return { fg: 'var(--fg)', accent: 'var(--accent)', accent2: 'var(--accent2)', muted: 'rgba(150,160,175,.55)' }[c] || c || 'var(--fg)';
+  }
+  function buildScene(s) {
+    var vb = s.viewbox || [1600, 900], defs = '', body = '';
+    SCENES[s.id] = (s.shapes || []);
+    (s.shapes || []).forEach(function (sh, i) {
+      var col = colorOf(sh.color), sw = sh.width || 4, k = sh.kind;
+      var clip = '';
+      if (sh.clip) {
+        defs += '<clipPath id="clip_' + s.id + '_' + i + '"><rect x="' + sh.clip[0] + '" y="' + sh.clip[1] +
+          '" width="' + sh.clip[2] + '" height="' + sh.clip[3] + '"></rect></clipPath>';
+        clip = ' clip-path="url(#clip_' + s.id + '_' + i + ')"';
+      }
+      var common = ' data-si="' + i + '" stroke="' + col + '" stroke-width="' + sw + '" stroke-linecap="round" stroke-linejoin="round"' +
+        (sh.dash ? ' stroke-dasharray="' + sh.dash + '"' : '') + clip;
+      var fill = sh.fill ? colorOf(sh.fill === true ? sh.color : sh.fill) : 'none';
+      if (k === 'line' || k === 'arrow') {
+        body += '<line class="sh draw"' + common + ' x1="' + sh.x1 + '" y1="' + sh.y1 + '" x2="' + sh.x2 + '" y2="' + sh.y2 + '" pathLength="1"></line>';
+        if (k === 'arrow' || sh.arrow) {
+          var dx = sh.x2 - sh.x1, dy = sh.y2 - sh.y1, L = Math.sqrt(dx * dx + dy * dy) || 1, hl = sh.head || 26;
+          dx /= L; dy /= L;
+          var bx = sh.x2 - hl * dx, by = sh.y2 - hl * dy, nx = -dy * hl * 0.55, ny = dx * hl * 0.55;
+          body += '<polygon class="sh-head" data-hi="' + i + '" fill="' + col + '"' + clip + ' points="' + sh.x2 + ',' + sh.y2 + ' ' +
+            (bx + nx).toFixed(1) + ',' + (by + ny).toFixed(1) + ' ' + (bx - nx).toFixed(1) + ',' + (by - ny).toFixed(1) + '"></polygon>';
+        }
+      } else if (k === 'path') {
+        body += '<path class="sh draw"' + common + ' fill="' + fill + '" d="' + attrEsc(sh.d || '') + '" pathLength="1"></path>';
+      } else if (k === 'polyline') {
+        body += '<polyline class="sh draw"' + common + ' fill="none" points="' + (sh.points || []).map(function (p) { return p[0] + ',' + p[1]; }).join(' ') + '" pathLength="1"></polyline>';
+      } else if (k === 'circle') {
+        body += '<circle class="sh draw"' + common + ' fill="' + fill + '" cx="' + sh.cx + '" cy="' + sh.cy + '" r="' + sh.r + '" pathLength="1"></circle>';
+      } else if (k === 'rect') {
+        body += '<rect class="sh fadein"' + common + ' fill="' + fill + '" x="' + sh.x + '" y="' + sh.y + '" width="' + sh.w + '" height="' + sh.h + '" rx="' + (sh.rx || 0) + '"></rect>';
+      } else if (k === 'text') {
+        body += '<text class="sh fadein scene-text" data-si="' + i + '" x="' + sh.x + '" y="' + sh.y + '" fill="' + col + '" font-size="' + (sh.size || 40) +
+          '" text-anchor="' + (sh.anchor || 'middle') + '" dominant-baseline="middle"' + clip + '>' + (sh.text || '') + '</text>';
+      } else if (k === 'math') {
+        var mw = sh.w || 420, mh = sh.h || 140;
+        body += '<foreignObject class="sh fadein" data-si="' + i + '" x="' + (sh.x - mw / 2) + '" y="' + (sh.y - mh / 2) + '" width="' + mw + '" height="' + mh + '">' +
+          '<div xmlns="http://www.w3.org/1999/xhtml" class="scene-math" style="font-size:' + (sh.size || 40) + 'px;color:' + col + '">' +
+          texSpan(sh.latex, false) + '</div></foreignObject>';
+      } else if (k === 'wave') {
+        body += '<polyline class="sh wave"' + common + ' fill="none" points=""></polyline>';
+      } else if (k === 'wavefronts') {
+        var range = sh.mode === 'circle' ? (sh.r_max || 400) : Math.abs((sh.x_end || 0) - (sh.x || 0));
+        var cnt = Math.ceil(range / (sh.spacing || 60)) + 1, paths = '';
+        for (var c = 0; c < cnt; c++) paths += '<path fill="none" d=""></path>';
+        body += '<g class="sh wf"' + common + '>' + paths + '</g>';
+      }
+    });
+    return '<svg class="scene" viewBox="0 0 ' + vb[0] + ' ' + vb[1] + '" preserveAspectRatio="xMidYMid meet">' +
+      (defs ? '<defs>' + defs + '</defs>' : '') + body + '</svg>';
+  }
+
+  // word-cue timing: the start time of the first narration word (in this slide) that begins
+  // with `cue`'s first word — so a reveal lands exactly when the narrator says it.
+  var _wordsBySlide = {};
+  function slideWords(id) {
+    if (!_wordsBySlide[id]) {
+      var tl = window.TIMELINE || { words: [] };
+      _wordsBySlide[id] = tl.words.filter(function (w) { return w.slide === id; });
+    }
+    return _wordsBySlide[id];
+  }
+  function cueKey(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  // Exact word matches win over prefix matches ("wave" must not fire on an earlier "wavefronts");
+  // `after` restricts the search to words spoken at/after that time (sequential reveals).
+  function cueTime(id, cue, fallback, after) {
+    if (!cue) return fallback;
+    var want = cueKey(String(cue).split(/\s+/)[0]);
+    if (!want) return fallback;
+    var ws = slideWords(id), from = after || -1, i;
+    for (i = 0; i < ws.length; i++) { if (ws[i].start >= from && cueKey(ws[i].word) === want) return ws[i].start; }
+    for (i = 0; i < ws.length; i++) { if (ws[i].start >= from && cueKey(ws[i].word).indexOf(want) === 0) return ws[i].start; }
+    return Math.max(fallback, from);
+  }
+
+  function renderScene(el, win, t) {
+    var shapes = SCENES[win.id] || [];
+    if (!el.__sh) {  // resolve nodes + start times once (cue lookups need TIMELINE, so lazily)
+      el.__sh = shapes.map(function (sh, i) {
+        var at = sh.at !== undefined ? win.start + Number(sh.at)
+          : (sh.step !== undefined ? win.start + 0.3 + Number(sh.step) * (sh.step_s || 0.8) : win.start + 0.15);
+        return { sh: sh, t0: cueTime(win.id, sh.cue, at), node: el.querySelector('[data-si="' + i + '"]'),
+                 head: el.querySelector('[data-hi="' + i + '"]') };
+      });
+    }
+    el.__sh.forEach(function (o) {
+      var sh = o.sh, n = o.node; if (!n) return;
+      var tt = t - o.t0, dur = sh.dur || 0.8, k = sh.kind;
+      if (n.classList.contains('draw') && sh.dash) {
+        n.style.opacity = clamp01(tt / 0.4).toFixed(3);
+        if (o.head) o.head.style.opacity = n.style.opacity;
+      } else if (n.classList.contains('draw')) {
+        var dp = clamp01(tt / dur), ep = easeOut(dp);
+        n.style.strokeDasharray = '1 1'; n.style.strokeDashoffset = (1 - ep).toFixed(4);
+        n.style.opacity = tt >= 0 ? 1 : 0;
+        if (n.getAttribute('fill') !== 'none') n.style.fillOpacity = clamp01((tt - dur * 0.6) / 0.4).toFixed(3);
+        if (o.head) o.head.style.opacity = dp > 0.9 ? 1 : 0;
+      } else if (n.classList.contains('fadein')) {
+        n.style.opacity = clamp01(tt / 0.4).toFixed(3);
+      } else if (k === 'wave') {
+        n.style.opacity = clamp01(tt / 0.4).toFixed(3);
+        var dx = sh.x2 - sh.x1, dy = sh.y2 - sh.y1, L = Math.sqrt(dx * dx + dy * dy) || 1, ux = dx / L, uy = dy / L;
+        var lam = sh.wavelength || 200, amp = sh.amp || 40, ph = 2 * Math.PI * ((sh.speed || 0) * Math.max(0, tt)) / lam + (sh.phase || 0);
+        var pts = [], N = 140;
+        for (var q = 0; q <= N; q++) {
+          var s0 = L * q / N, off = amp * Math.sin(2 * Math.PI * s0 / lam - ph);
+          pts.push((sh.x1 + ux * s0 - uy * off).toFixed(1) + ',' + (sh.y1 + uy * s0 + ux * off).toFixed(1));
+        }
+        n.setAttribute('points', pts.join(' '));
+      } else if (k === 'wavefronts') {
+        n.style.opacity = tt >= 0 ? 1 : 0;
+        var sp = sh.spacing || 60, v = sh.speed || 60, adv = v * Math.max(0, tt), paths = n.children;
+        for (var c = 0; c < paths.length; c++) {
+          var d = '', op = 1;
+          if (sh.mode === 'circle') {
+            var r = (adv % sp) + (paths.length - 1 - c) * sp, rmax = sh.r_max || 400;
+            if (r > 2 && r <= rmax && r <= adv) {
+              var a0 = (sh.a0 !== undefined ? sh.a0 : -90) * Math.PI / 180, a1 = (sh.a1 !== undefined ? sh.a1 : 90) * Math.PI / 180;
+              var large = (a1 - a0) > Math.PI ? 1 : 0;
+              d = 'M' + (sh.cx + r * Math.cos(a0)).toFixed(1) + ',' + (sh.cy + r * Math.sin(a0)).toFixed(1) +
+                ' A' + r.toFixed(1) + ',' + r.toFixed(1) + ' 0 ' + large + ' 1 ' + (sh.cx + r * Math.cos(a1)).toFixed(1) + ',' + (sh.cy + r * Math.sin(a1)).toFixed(1);
+              op = 1 - 0.7 * (r / rmax);
+            }
+          } else {  // plane wavefronts moving +x from x to x_end
+            var x = sh.x + (adv % sp) + c * sp;
+            if (x <= sh.x_end) d = 'M' + x.toFixed(1) + ',' + sh.y1 + ' L' + x.toFixed(1) + ',' + sh.y2;
+          }
+          paths[c].setAttribute('d', d);
+          paths[c].style.opacity = op.toFixed(3);
+        }
+      }
+    });
   }
 
   // wrap any word in `accent`/`accent2` lists with a highlight span
@@ -238,6 +408,29 @@
     } else if (s.type === 'figure') {
       html += '<div class="figframe"><img src="' + s.image + '" alt=""></div>';
       if (s.caption) html += '<div class="figcaption">' + s.caption + '</div>';
+    } else if (s.type === 'equation') {
+      // one display equation (verbatim from the source) + a legend that explains each symbol
+      html += '<div class="eqmain">' + texSpan(s.latex, true) + '</div>';
+      if (s.label) html += '<div class="eqlabel">' + s.label + '</div>';
+      if ((s.symbols || []).length) html += '<div class="eqlegend">' + s.symbols.map(function (sy) {
+        return '<div class="eqrow"' + cueAttr(sy.cue) + '><span class="eqsym">' + texSpan(sy.tex || sy.symbol || '', false) +
+          '</span><span class="eqmean">' + (sy.meaning || '') +
+          (sy.unit ? ' <span class="equnit">(' + sy.unit + ')</span>' : '') + '</span></div>';
+      }).join('') + '</div>';
+    } else if (s.type === 'derivation') {
+      // a step-by-step sequence of lines — ONLY steps that appear in the source (see check.py)
+      html += '<div class="deriv">' + (s.steps || []).map(function (st) {
+        return '<div class="drow"' + cueAttr(st.cue) + '><div class="dmath">' + texSpan(st.latex, true) + '</div>' +
+          (st.note ? '<div class="dnote">' + st.note + '</div>' : '') + '</div>';
+      }).join('') + '</div>';
+    } else if (s.type === 'scene2d') {
+      html += buildScene(s);
+      if (s.caption) html += '<div class="figcaption">' + s.caption + '</div>';
+    } else if (s.type === 'meme') {
+      // original meme-format card (setup / reaction emoji / punchline) — no third-party images
+      html += '<div class="meme"><div class="meme-setup">' + (s.setup || '') + '</div>' +
+        (s.emoji ? '<div class="meme-emoji">' + s.emoji + '</div>' : '') +
+        '<div class="meme-punch">' + headlineHTML(s.punch || '', s.accent, s.accent2) + '</div></div>';
     } else if (s.type === 'cta') {
       var b = DECK.brand || {}, c = b.cta || {};
       if (b.product) html += '<div class="figframe cta-product"><img src="' + b.product + '" alt=""></div>';
@@ -252,9 +445,44 @@
     if (s.subkicker) html += '<div class="subkicker">' + s.subkicker + '</div>';
     // sourced data-viz: a small citation pinned bottom-left (no chart-junk, just provenance).
     if (s.source) html += '<div class="srcline">Source: ' + s.source + '</div>';
+    // PDF provenance badge: distinguishes the source's own claims from supplementary ones
+    if (s.claim || s.page) {
+      var bt = s.claim === 'supplement' ? 'Supplementary' : 'From the text';
+      if (s.page && s.claim !== 'supplement') bt += ' · p. ' + s.page;
+      html += '<div class="pgbadge ' + (s.claim === 'supplement' ? 'supp' : 'src') + '">' + bt + '</div>';
+    }
     el.innerHTML = html;
     stage.appendChild(el);
   });
+
+  // procedural animated background (BRAINROT default when no licensed footage is supplied):
+  // original geometry only — scrolling stripes + seeded floating shapes, transform-driven.
+  var fx = null, fxShapes = [];
+  if (DECK.bg_fx === 'procedural') {
+    fx = document.createElement('div'); fx.id = 'fx';
+    fx.innerHTML = '<div class="fx-stripes"></div>';
+    var glyphs = ['●', '▲', '■', '✚', '◆', '★', '~', '◯'];
+    for (var fi = 0; fi < 16; fi++) {
+      var g = document.createElement('div'); g.className = 'fx-shape ' + (fi % 3 === 0 ? 'a2' : (fi % 3 === 1 ? 'a1' : 'fg'));
+      g.textContent = glyphs[fi % glyphs.length];
+      var spec = { x: Math.random(), y: Math.random(), s: 0.5 + Math.random() * 1.3, vx: (Math.random() - 0.5) * 0.05,
+                   vy: -0.02 - Math.random() * 0.05, rot: (Math.random() - 0.5) * 90, ph: Math.random() * 6.28 };
+      g.style.fontSize = Math.round(Math.min(window.innerWidth, window.innerHeight) * 0.07 * spec.s) + 'px';
+      fx.appendChild(g); fxShapes.push({ el: g, sp: spec });
+    }
+    document.body.insertBefore(fx, document.body.firstChild);
+  }
+  // licensed background footage is composited UNDER the deck by ffmpeg (render.py): the page
+  // renders with a transparent background plus a dark scrim so content stays legible.
+  if (DECK.bg_video) {
+    document.documentElement.style.background = 'transparent';
+    document.body.style.background = 'transparent';
+    var scrim = document.createElement('div'); scrim.id = 'scrim';
+    document.body.insertBefore(scrim, document.body.firstChild);
+  }
+  var flash = null;
+  if (DECK.flash) { flash = document.createElement('div'); flash.id = 'flash'; document.body.appendChild(flash); }
+  if (DECK.caption_style) captionEl.classList.add('cap-' + DECK.caption_style);
 
   var slideEls = {};
   Array.prototype.forEach.call(stage.children, function (el) { slideEls[el.dataset.id] = el; });
@@ -316,16 +544,33 @@
       ambient.style.transform = 'translate(' + (3.2 * Math.sin(t * 0.37)).toFixed(2) + '%,'
         + (2.6 * Math.cos(t * 0.29)).toFixed(2) + '%)';
     }
+    if (fx) {  // procedural background: stripes scroll, shapes drift/rotate/bob (all f(t))
+      var vw0 = window.innerWidth, vh0 = window.innerHeight;
+      fx.firstChild.style.transform = 'translate(' + (-((t * 90) % 120)).toFixed(1) + 'px,0) rotate(-12deg)';
+      fxShapes.forEach(function (f) {
+        var sp = f.sp, x = ((sp.x + sp.vx * t) % 1 + 1) % 1, y = ((sp.y + sp.vy * t) % 1 + 1) % 1;
+        f.el.style.transform = 'translate(' + (x * vw0).toFixed(1) + 'px,' + ((y * 1.2 - 0.1) * vh0 + Math.sin(t * 2.1 + sp.ph) * 14).toFixed(1) +
+          'px) rotate(' + (sp.rot * t).toFixed(1) + 'deg)';
+      });
+    }
     var active = tl.slides[0];
     tl.slides.forEach(function (s) { if (t >= s.start) active = s; });
+    if (flash) { var fdt = t - active.start; flash.style.opacity = (fdt >= 0 && fdt < 0.12 && active !== tl.slides[0]) ? (0.55 * (1 - fdt / 0.12)).toFixed(3) : 0; }
+    var introS = DECK.intro_s || 0.6;
 
     tl.slides.forEach(function (win) {
       var el = slideEls[win.id]; if (!el) return;
       if (t < win.start || t >= win.end) { el.style.opacity = 0; el.style.transform = 'translateY(40px)'; return; }
       var span = win.end - win.start;
-      var p = easeOut((t - win.start) / Math.min(0.6, span));
-      el.style.opacity = p;
-      el.style.transform = introTransform(styleById[win.id] || DECK_MOTION, p);
+      var raw = clamp01((t - win.start) / Math.min(introS, span));
+      var p = easeOut(raw);
+      var style = styleById[win.id] || DECK_MOTION;
+      el.style.opacity = (style === 'wipe' || style === 'zoom' || style === 'whip' || style === 'drop' || style === 'glitch') ? Math.min(1, raw * 3) : p;
+      var tr = introTransform(style, p, raw, t);
+      // slow push-in after the intro so a held shot never reads as a frozen frame (BRAINROT)
+      if (DECK.kenburns) tr += ' scale(' + (1 + 0.035 * Math.min(span, Math.max(0, t - win.start))).toFixed(4) + ')';
+      el.style.transform = tr;
+      el.style.clipPath = (style === 'wipe' && raw < 1) ? 'inset(0 ' + ((1 - p) * 100).toFixed(2) + '% 0 0)' : '';
       var rt = el.dataset.type;
       if (rt === 'diagram') {
         var g = easeOut((t - win.start) / Math.min(1.0, span));
@@ -465,6 +710,42 @@
         var deg = Math.max(0, easeOut((t - win.start - 0.3) / Math.min(0.6, span)));
         var body = el.querySelector('.def-body');
         if (body) { body.style.opacity = deg; body.style.transform = 'translateY(' + ((1 - deg) * 16).toFixed(1) + 'px)'; }
+      } else if (rt === 'equation') {
+        var eqg = easeOut((t - win.start - 0.1) / Math.min(0.8, span));
+        var eqm = el.querySelector('.eqmain');
+        if (eqm) { eqm.style.opacity = eqg; eqm.style.transform = 'scale(' + (0.94 + 0.06 * eqg).toFixed(4) + ')'; }
+        var prevT = undefined;
+        Array.prototype.forEach.call(el.querySelectorAll('.eqrow'), function (row, idx) {
+          var t0 = cueTime(win.id, row.dataset.cue, win.start + 0.9 + idx * 0.7, prevT);
+          prevT = t0 + 0.01;
+          var rg = Math.max(0, easeOut((t - t0) / 0.45));
+          row.style.opacity = rg;
+          row.style.transform = 'translateY(' + ((1 - rg) * 18).toFixed(1) + 'px)';
+          row.classList.toggle('now', t >= t0 && t < t0 + 1.6);
+        });
+      } else if (rt === 'derivation') {
+        var drows = el.querySelectorAll('.drow'), lastOn = -1, dts = [];
+        Array.prototype.forEach.call(drows, function (row, idx) {
+          dts[idx] = cueTime(win.id, row.dataset.cue, win.start + 0.3 + idx * Math.max(1.2, (span - 0.6) / drows.length),
+                             idx ? dts[idx - 1] + 0.01 : undefined);
+          if (t >= dts[idx]) lastOn = idx;
+        });
+        Array.prototype.forEach.call(drows, function (row, idx) {
+          var dg = Math.max(0, easeOut((t - dts[idx]) / 0.5));
+          row.style.opacity = (idx < lastOn ? 0.45 : 1) * dg;   // earlier steps recede, current step leads
+          row.style.transform = 'translateX(' + ((1 - dg) * -26).toFixed(1) + 'px)';
+          row.classList.toggle('now', idx === lastOn);
+        });
+      } else if (rt === 'scene2d') {
+        renderScene(el, win, t);
+      } else if (rt === 'meme') {
+        var ms = easeOut((t - win.start) / Math.min(0.3, span));
+        var me = el.querySelector('.meme-emoji'), mp = el.querySelector('.meme-punch'), mset0 = el.querySelector('.meme-setup');
+        if (mset0) mset0.style.opacity = ms;
+        var pt0 = win.start + Math.min(span * 0.4, 0.9);
+        if (me) me.style.transform = 'scale(' + (0.3 + 0.7 * backOut((t - win.start - 0.1) / 0.35)).toFixed(4) + ') rotate(' +
+          (Math.sin((t - win.start) * 9) * 8).toFixed(2) + 'deg)';
+        if (mp) { var mpg = clamp01((t - pt0) / 0.22); mp.style.opacity = mpg; mp.style.transform = 'scale(' + (0.5 + 0.5 * backOut(mpg)).toFixed(4) + ')'; }
       }
     });
 
@@ -487,11 +768,14 @@
       var vw = window.innerWidth, vh = window.innerHeight;  // actual viewport (multi-aspect)
       var safeBottom = DECK.safe_bottom || 0.14;            // platform safe-zone inset
       captionEl.style.bottom = Math.round(vh * safeBottom) + 'px';
-      var fs = Math.round(Math.min(vw, vh) * 0.052);        // short-side => consistent across aspects
+      var fs = Math.round(Math.min(vw, vh) * ({ brainrot: 0.105, lecture: 0.036 }[DECK.caption_style] || 0.052));  // short-side => consistent across aspects
       var chunk = 0, cnt = 0;
       words.forEach(function (w) {
         var sp = document.createElement('span'); sp.className = 'w'; sp.textContent = w.word;
         sp.style.fontSize = fs + 'px';
+        // symbols are case-sensitive (f = frequency, F = force; m = metres, M = mega): never case-transform
+        // single-letter tokens or anything with a digit in the styled caption modes
+        if ((/^[^A-Za-z0-9]*[A-Za-z\u0370-\u03ff][^A-Za-z0-9]*$/.test(w.word) && !/^\W*(a|A|I)\W*$/.test(w.word)) || /\d/.test(w.word)) sp.setAttribute('data-sym', '1');
         sp.setAttribute('data-chunk', chunk);                // chunk membership for window mode
         captionEl.appendChild(sp);
         cnt++;
@@ -513,6 +797,15 @@
         spans[k].style.display = (+spans[k].getAttribute('data-chunk') === activeChunk) ? '' : 'none';
       }
       spans[k].className = on ? 'w active' : 'w';
+      if (DECK.caption_style === 'brainrot' && w) {
+        // kinetic pop: each word springs in (overshoot) the moment it is spoken, with a small
+        // alternating tilt per chunk; words not yet spoken in the chunk wait at low opacity.
+        var wdt = t - w.start, chunkN = +spans[k].getAttribute('data-chunk');
+        var sc = wdt < 0 ? 0.85 : (wdt < 0.16 ? 0.55 + 0.45 * backOut(wdt / 0.16) * 1.0 : 1.0);
+        spans[k].style.opacity = wdt < 0 ? 0.35 : 1;
+        spans[k].style.transform = 'scale(' + (sc * (on ? 1.08 : 1)).toFixed(4) + ') rotate(' + (chunkN % 2 ? 2.5 : -2.5) + 'deg)';
+        continue;
+      }
       // gentle emphasis: color (in CSS) + a small scale. Keep the scale modest so the
       // enlarged active word doesn't visually crowd its neighbours (scale doesn't reflow).
       spans[k].style.transform = on ? 'scale(1.06)' : 'scale(1.0)';
@@ -523,11 +816,60 @@
   // first captured frame uses real fonts (not a fallback). Themes with no `fonts` field
   // declare zero faces, so this resolves immediately — no delay for them.
   function signalReady() { window.__deckReady = true; }
-  if (document.fonts && document.fonts.size) {
-    var loads = [];
-    document.fonts.forEach(function (ff) { loads.push(ff.load().catch(function () {})); });
-    Promise.all(loads).then(function () { return document.fonts.ready; }).then(signalReady, signalReady);
+  function afterMath() {
+    if (document.fonts && document.fonts.size) {
+      var loads = [];
+      document.fonts.forEach(function (ff) { loads.push(ff.load().catch(function () {})); });
+      Promise.all(loads).then(function () { return document.fonts.ready; }).then(signalReady, signalReady);
+    } else {
+      signalReady();
+    }
+  }
+
+  // Typeset every LaTeX placeholder once, then measure: a math node that errored, has zero
+  // size, or would overflow the viewport is reported (window.__mathReport -> work/math_report.json)
+  // so QA can fail on missing/distorted equations. Wide display equations are scaled down
+  // UNIFORMLY (font-size) to fit — never stretched — and the scale is recorded.
+  function typesetAll() {
+    var report = [], vw = window.innerWidth, vh = window.innerHeight;
+    // tex2svg() bypasses the document pipeline, so add MathJax's SVG stylesheet ourselves (before measuring)
+    document.head.appendChild(MathJax.svgStylesheet());
+    Array.prototype.forEach.call(document.querySelectorAll('.tex'), function (ph) {
+      var spec = TEX[+ph.dataset.ti], slide = ph.closest('.slide'), rec = { slide: slide ? slide.dataset.id : null, tex: spec.tex };
+      try {
+        var node = MathJax.tex2svg(spec.tex, { display: spec.display });
+        ph.appendChild(node);
+        var err = node.querySelector('[data-mjx-error]');
+        rec.ok = !err; if (err) rec.error = err.getAttribute('data-mjx-error');
+      } catch (e) { rec.ok = false; rec.error = String(e); }
+      var box = ph.getBoundingClientRect(), host = ph.closest('.eqmain, .dmath');
+      if (host && box.width > 0) {
+        var maxW = host.getBoundingClientRect().width || vw * 0.85, scale = 1;
+        if (box.width > maxW) {
+          scale = maxW / box.width;
+          var fs0 = parseFloat(getComputedStyle(host).fontSize);
+          host.style.fontSize = (fs0 * scale).toFixed(1) + 'px';
+          box = ph.getBoundingClientRect();
+        }
+        rec.scale = +scale.toFixed(3);
+      }
+      rec.w = Math.round(box.width); rec.h = Math.round(box.height);
+      if (rec.ok && (rec.w === 0 || rec.h === 0)) { rec.ok = false; rec.error = 'zero-size render'; }
+      if (rec.ok && !ph.closest('foreignObject') && (box.right > vw + 1 || box.left < -1 || box.bottom > vh + 1)) {
+        rec.ok = false; rec.error = 'outside viewport';
+      }
+      report.push(rec);
+    });
+    window.__mathReport = report;
+  }
+
+  if (TEX.length && window.MathJax && MathJax.startup && MathJax.startup.promise) {
+    MathJax.startup.promise.then(typesetAll).then(afterMath, function (e) {
+      window.__mathReport = [{ ok: false, error: 'MathJax startup failed: ' + e }]; afterMath();
+    });
   } else {
-    signalReady();
+    if (TEX.length) window.__mathReport = TEX.map(function (x) { return { tex: x.tex, ok: false, error: 'MathJax not loaded' }; });
+    else window.__mathReport = [];
+    afterMath();
   }
 })();

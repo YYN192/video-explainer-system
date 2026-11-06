@@ -4,6 +4,11 @@ import json, re, time
 
 
 def _norm(tok):
+    # fold diacritics first (é -> e, ç -> c) so es/fr/it/pt narration aligns with MMS_FA's
+    # romanized a–z alphabet; a no-op for plain-ASCII English.
+    import unicodedata
+    tok = unicodedata.normalize("NFKD", tok)
+    tok = "".join(c for c in tok if not unicodedata.combining(c))
     return re.sub(r"[^a-z]", "", tok.lower())
 
 

@@ -1,7 +1,7 @@
 # Product Requirements Document — **Explainer System**
 ### A local-first Claude Code skill that turns a topic or source document into a visually dynamic HTML explainer deck and a narrated video, end-to-end.
 
-- **Status:** **v1.0.0 shipped**; **v1.1 expansion** spec'd (§18: operator voiceover + integrated recorder + talk-time read + coach UX). History in §16 Changelog.
+- **Status:** **v1.0.0 shipped**; **v1.1 expansion** spec'd (§18: operator voiceover + integrated recorder + talk-time read + coach UX); **v1.2 PDF profiles** built (§19: BRAINROT / EDUCATIONAL). History in §16 Changelog.
 - **Author:** Dave Saunders (with Claude Code)
 - **Date:** 2026-05-30
 - **Working directory:** `/Volumes/Casima/claudeCode/explainer-system`
@@ -458,3 +458,54 @@ video → "what do you think?") *or* **co-build interactively** for higher-produ
 *End of v1.1 draft. Confirmed: voiceover via an integrated browser recorder (no external app); audio
 cleanup via the local VocalEnhancer skill (streaming/−14 LUFS); talk-time READ filtered by topic+brand;
 `--interview` writes raw to `talk_time/raw/` (no auto-distill). Building in the order of §18.8.*
+
+---
+
+## 19. PDF profiles — BRAINROT & EDUCATIONAL (v1.2, operator-directed 2026-11-06)
+
+Two reusable **production profiles** turn a PDF (or page range) into a finished MP4. A profile is
+plain data (`src/explainer/profiles.py`) applied at scaffold time into `project.json`; the
+authoring rules live in `skills/explainer/BRAINROT_STYLE.md` / `EDUCATIONAL_STYLE.md`. **A
+project without a profile behaves exactly as before** (verified by a legacy regression run).
+
+| | BRAINROT | EDUCATIONAL |
+|---|---|---|
+| aspect / length | 9:16 · 45–90 s | 16:9 · 4–8 min |
+| voice / speed / gap | am_puck · 1.18 · 0.05 s | bm_george · 0.97 · 0.30 s |
+| captions | 2-word, huge, outlined, per-word pop | 7-word quiet subtitle |
+| motion | energetic transitions, cut flash, push-in, procedural bg | calm transitions, ambient glow |
+| audio | procedural SFX on every cut | narration only |
+
+**Pipeline additions** (generation/media split unchanged — all new checks are pure Python):
+- **Ingest** writes `sources/<sid>_pages.json` (per-page NFKC text) + hi-res crops of
+  equation-looking lines and proximity-merged figure regions. Equations are transcribed by Claude
+  from the crops (vision), never from extracted text (superscripts are lost).
+- **Math**: vendored MathJax 3.2.2 SVG (offline, no fonts), typeset once before `__deckReady`;
+  the engine reports errors / zero-size / off-screen formulas (`work/math_report.json`).
+- **Devices**: `equation` (formula + cued symbol legend), `derivation` (cued source steps),
+  `scene2d` (declarative animated SVG: wavefronts, travelling waves, arrows, math labels),
+  `meme` (original format cards); `claim`/`page` provenance badges; transitions
+  `zoom·spin·whip·drop·glitch·wipe`; brainrot/lecture caption styles; word-cue timing.
+- **`explainer check`** (pre-render gate): source quotes must occur on the cited page; on-screen
+  formulas must be verified registry entries; derivations may only use source steps; narration
+  may not contain raw symbols; G2P-OOV terms listed (+ optional review WAV); duration, hook,
+  shot-length, variety and transition-repetition checks. Writes `review/outline.md` for the
+  operator review checkpoint. **`explainer eqsheet`** renders PDF crop vs LaTeX side by side.
+- **`explainer verify`** (post-render, automatic for profile runs): streams + durations, caption
+  sync (words vs `silencedetect`), math report, one frame per slide from the final MP4 + contact
+  sheet, and saves `script/`, `storyboard/`, `captions/`.
+- **Audio**: `media/sfx.py` synthesizes original SFX (no samples); mux mixes them with
+  `normalize=0` + limiter (legacy music-only mix path untouched). Narration language
+  (`en-us/en-gb/es/fr/it/pt-br`), speed and inter-segment gap are project fields; the aligner
+  folds diacritics. **Bulgarian narration is out of scope** (no Kokoro voice; Latin-script aligner).
+- **Licensed footage only**: `--bg-video` composites operator-supplied footage under a
+  transparent deck in ffmpeg; nothing copyrighted ships. `manifest.json` gains `profile` and a
+  `max_length` check.
+
+**Acceptance (M5 Pro / 24 GB, 2026-11-06)** on a generated 3-page IGCSE 0625 §3.1 sample
+(diffraction + an interference extension): EDUCATIONAL 177 s 16:9 (render 1.67× RT, 0/442
+caption words in silence, 8 verified equations, 17 quote-checked claims, A/V Δ 0.02 s);
+BRAINROT 52 s 9:16 (render 1.25× RT, 0 dead-air spans, 18 SFX events, −15.2 LUFS). Both
+`verify ok`. Bugs caught by the QA loop and fixed: duplicate MathJax render (assistive MML),
+cue prefix-matching out of order, figure regions split by zero-width lines, and uppercase
+display type turning "3 m" into "3 M" (units/symbols are now never case-transformed).

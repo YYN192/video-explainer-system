@@ -29,6 +29,10 @@ def run(proj):
     if proj.min_length and duration and duration < proj.min_length:
         length_warning = f"duration {duration}s is under min_length {proj.min_length}s — deepen the script"
         ready = False
+    max_length = proj.data.get("max_length")
+    if max_length and duration and duration > max_length:
+        length_warning = f"duration {duration}s is over max_length {max_length}s — trim the lowest-priority beats"
+        ready = False
 
     manifest = {
         "schema_version": "0.1",
@@ -49,6 +53,7 @@ def run(proj):
             "recommended_label": "creator-disclosed", "c2pa_embedded": False,
         },
         "per_platform": meta.get("per_platform", []),
+        "profile": proj.data.get("profile"),
         "sources": meta.get("sources", []),
     }
     proj.write_json(proj.dir / "manifest.json", manifest)

@@ -12,12 +12,35 @@ import json, time, math, subprocess
 from playwright.sync_api import sync_playwright
 
 
-def _ffmpeg_video_only(proj, label, fps):
-    """Start an ffmpeg that reads PNG frames from stdin and writes a video-only MP4."""
+def _bg_video_path(proj):
+    """Optional operator-supplied, licensed background footage (project.json `bg_video`)."""
+    from pathlib import Path
+    v = proj.data.get("bg_video")
+    if not v:
+        return None
+    p = Path(v) if Path(v).is_absolute() else proj.dir / v
+    if not p.exists():
+        raise FileNotFoundError(f"bg_video not found: {p}")
+    return p
+
+
+def _ffmpeg_video_only(proj, label, fps, size=None, bg=None):
+    """Start an ffmpeg that reads PNG frames from stdin and writes a video-only MP4.
+    With `bg` (licensed footage), the frames are transparent PNGs composited OVER the
+    footage, which is looped, cover-cropped to the aspect and stripped of its audio."""
     out = proj.work / f"video_{label}.mp4"
     log = open(proj.work / f"render_ffmpeg_{label}.log", "wb")
-    cmd = ["ffmpeg", "-hide_banner", "-y",
-           "-f", "image2pipe", "-framerate", str(fps), "-i", "-",
+    if bg:
+        w, h = size
+        src = ["-stream_loop", "-1", "-i", str(bg),
+               "-f", "image2pipe", "-framerate", str(fps), "-i", "-",
+               "-filter_complex",
+               f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps},setsar=1[bg];"
+               f"[bg][1:v]overlay=0:0:shortest=1,format=yuv420p[v]",
+               "-map", "[v]", "-an"]
+    else:
+        src = ["-f", "image2pipe", "-framerate", str(fps), "-i", "-"]
+    cmd = ["ffmpeg", "-hide_banner", "-y", *src,
            "-c:v", "h264_videotoolbox", "-b:v", "8M", "-pix_fmt", "yuv420p",
            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
            "-color_range", "tv", "-movflags", "+faststart", str(out)]
@@ -34,7 +57,8 @@ def run(proj):
     deck_url = (proj.deck_dir / "index.html").as_uri()
     recycle = int(proj.data.get("render_recycle_frames", 3000))  # 0 disables page recycling
 
-    results = {}
+    bg = _bg_video_path(proj)
+    results, math_reports = {}, {}
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--force-color-profile=srgb", "--hide-scrollbars", "--disable-gpu"])
         for aspect in proj.aspects:
@@ -52,8 +76,10 @@ def run(proj):
                 pg.evaluate("tl => { window.TIMELINE = tl; }", timeline)
                 return pg
 
-            proc, log, out = _ffmpeg_video_only(proj, label, fps)
+            proc, log, out = _ffmpeg_video_only(proj, label, fps, size=(w, h), bg=bg)
             page = open_page()
+            # equations are typeset at load; keep the engine's per-equation report for QA
+            math_reports[aspect] = page.evaluate("window.__mathReport || []")
             cap_s = 0.0
             try:
                 for i in range(total):
@@ -62,7 +88,7 @@ def run(proj):
                         page = open_page()
                     page.evaluate("t => window.renderAt(t)", i / fps)
                     ts = time.time()
-                    buf = page.screenshot(clip={"x": 0, "y": 0, "width": w, "height": h})
+                    buf = page.screenshot(clip={"x": 0, "y": 0, "width": w, "height": h}, omit_background=bool(bg))
                     proc.stdin.write(buf)          # backpressure: blocks if ffmpeg is busy -> bounded RAM
                     cap_s += time.time() - ts
             finally:
@@ -85,4 +111,6 @@ def run(proj):
         browser.close()
 
     proj.write_json(proj.work / "metrics_render.json", {"fps": fps, "aspects": results})
+    if any(math_reports.values()):
+        proj.write_json(proj.work / "math_report.json", math_reports)
     return {"aspects": list(results), **{f"{a}_xRT": results[a]["render_x_realtime"] for a in results}}

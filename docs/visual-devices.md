@@ -291,3 +291,69 @@ but they still want **≥ 5s** and the readability guidance in their entries abo
 - **checklist** — a do/don't tick-vs-cross variant (would likely be a `list` mode, not a new device).
 - Pie charts: **intentionally excluded** (hard to read on a phone; McKinsey banned them). Single-
   series arcs are fine — see `ring`.
+
+---
+
+## PDF-profile devices
+
+Added for the BRAINROT / EDUCATIONAL profiles (PRD §19) but usable in any deck. Formulas render
+with the vendored MathJax 3 (SVG, offline) and must come from `equations.json` (see
+`explainer check`). Any `cue` is a narration word: the element appears the moment that word is
+spoken (exact word match first, then prefix; sequential rows only search after the previous row).
+
+### `equation`
+One display formula + a symbol legend.
+```json
+{ "id": "l3", "type": "equation", "title": "The wave equation", "latex": "v = f\\lambda", "label": "wave equation",
+  "symbols": [ { "tex": "v", "meaning": "wave speed", "unit": "m/s", "cue": "speed" },
+               { "tex": "\\lambda", "meaning": "wavelength", "unit": "m", "cue": "wavelength" } ] }
+```
+
+### `derivation`
+Lines revealed one by one (earlier lines recede, the current line is marked). **Source steps only.**
+```json
+{ "id": "l13", "type": "derivation", "title": "Worked example", "steps": [
+  { "latex": "4.25\\ \\text{m} - 3.00\\ \\text{m} = 1.25\\ \\text{m}", "note": "path difference", "cue": "path" },
+  { "latex": "1.25\\ \\text{m} = 2.5\\lambda", "note": "λ = 0.50 m", "cue": "two" } ] }
+```
+
+### `scene2d`
+A declarative, animated SVG diagram in `viewbox` units (default `[1600, 900]`; use `[1000, 1000]`
+for 9:16). Each shape appears at `at` (s after slide start), `step` (× `step_s`, default 0.8 s) or
+`cue`. Colours: `fg` · `accent` · `accent2` · `muted` · any CSS colour. Optional `clip: [x,y,w,h]`.
+
+| kind | fields | motion |
+|---|---|---|
+| `line` / `arrow` | `x1 y1 x2 y2`, `width`, `dash`, `head` | draws on (arrowhead at the end) |
+| `path` | `d` (SVG path data), `fill` | draws on, fill fades in |
+| `polyline` | `points: [[x,y],…]` | draws on |
+| `circle` | `cx cy r`, `fill` | draws on |
+| `rect` | `x y w h`, `rx`, `fill` | fades in |
+| `text` | `x y text`, `size`, `anchor` | fades in |
+| `math` | `x y latex`, `size`, `w h` (box) | fades in |
+| `wave` | `x1 y1 x2 y2`, `amp`, `wavelength`, `speed` | travelling sinusoid |
+| `wavefronts` | `mode:"plane"`: `x x_end y1 y2`; `mode:"circle"`: `cx cy r_max a0 a1` (deg); `spacing`, `speed` | moving wavefronts |
+
+```json
+{ "id": "l5", "type": "scene2d", "viewbox": [1600, 900], "caption": "plane in → curved out", "shapes": [
+  { "kind": "rect", "x": 750, "y": 60, "w": 22, "h": 320, "fill": "fg" },
+  { "kind": "wavefronts", "mode": "plane", "x": 120, "x_end": 740, "y1": 110, "y2": 790, "spacing": 110, "speed": 110, "color": "accent" },
+  { "kind": "wavefronts", "mode": "circle", "cx": 772, "cy": 450, "r_max": 780, "a0": -80, "a1": 80,
+    "spacing": 110, "speed": 110, "color": "accent", "clip": [776, 0, 824, 900], "cue": "curved" } ] }
+```
+
+### `meme`
+An original meme-format card: setup line → bouncing emoji → punchline. Never third-party images.
+```json
+{ "id": "b2", "type": "meme", "setup": "Light at a doorway:", "emoji": "🙅", "punch": "nah, straight line only", "accent2": ["straight"] }
+```
+
+### Provenance badge (any slide)
+`"claim": "source", "page": 12` → *FROM THE TEXT · P. 12*; `"claim": "supplement"` → dashed
+*SUPPLEMENTARY*. EDUCATIONAL decks badge every factual slide.
+
+### More transitions
+`zoom` · `spin` · `whip` · `drop` · `glitch` · `wipe` (in addition to `rise` · `fade` · `pop` ·
+`slide`). The energetic ones suit BRAINROT; EDUCATIONAL sticks to `fade` · `rise` · `wipe` · `pop`.
+Per-slide `"sfx": "whoosh|pop|boom|ding|glitch|tick|none"` overrides the SFX chosen for the cut
+(when the project has `"sfx": true`).

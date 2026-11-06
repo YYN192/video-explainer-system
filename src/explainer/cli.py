@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .project import Project, ASPECTS
 from . import deckbuild, manifest, wiki, ingest, themes, qa, presets, validate, handoff, brand, talktime, stills
+from . import profiles, check, verify
 from .media import synth, align, render, mux
 
 STAGES = [("narrate", synth.run), ("align", align.run), ("deck", deckbuild.run),
@@ -23,7 +24,24 @@ def _log(proj, msg):
 
 
 def cmd_scaffold(args):
-    aspect, safe_bottom, min_length = args.aspect, 0.14, args.min_length
+    # a production profile (PRD §19) supplies defaults; explicit flags still win
+    prof = profiles.resolve(args.profile) if args.profile else {}
+    aspect = args.aspect or prof.get("aspect") or "9:16"
+    safe_bottom = prof.get("safe_bottom", 0.14)
+    min_length, max_length = args.min_length or prof.get("min_length"), prof.get("max_length")
+    if args.duration:
+        min_length, max_length = profiles.parse_duration(args.duration)
+    lang_code, lang = profiles.language(args.language)
+    if not lang:
+        print(json.dumps({"error": f"unsupported --language {args.language!r}",
+                          "supported": list(profiles.LANGUAGES)}))
+        return 1
+    if args.voice:
+        voice = args.voice
+    elif not lang_code.startswith("en"):
+        voice = lang["default_voice"]          # a voice that matches the narration language
+    else:
+        voice = prof.get("voice", "af_heart")
     aspects = [a.strip() for a in args.aspects.split(",")] if args.aspects else None
     if args.platform:
         pre = presets.resolve(args.platform)
@@ -41,10 +59,25 @@ def cmd_scaffold(args):
     out.mkdir(parents=True, exist_ok=True)
     proj = {"title": args.title or args.slug, "slug": slug, "aspect": primary,
             "aspects": aspects, "width": w, "height": h, "fps": args.fps,
-            "voice": args.voice, "voice_source": args.voice_source,
-            "language": "en", "theme": args.theme, "safe_bottom": safe_bottom}
+            "voice": voice, "voice_source": args.voice_source,
+            "language": lang_code if args.profile or args.language else "en",
+            "theme": args.theme or prof.get("theme") or "midnight", "safe_bottom": safe_bottom}
+    if args.profile:
+        proj["profile"] = args.profile
+        for k, v in prof.items():
+            if k not in ("aspect", "theme", "voice", "min_length", "max_length", "safe_bottom") and v is not None:
+                proj[k] = v
+    if args.speed:
+        proj["speech_speed"] = args.speed
+    if args.bg_video:
+        proj["bg_video"] = str(Path(args.bg_video).resolve())
+        proj.pop("bg_fx", None)
+    if args.music:
+        proj["music"] = str(Path(args.music).resolve())
     if min_length:
         proj["min_length"] = min_length
+    if max_length:
+        proj["max_length"] = max_length
     if args.no_cta:
         proj["auto_cta"] = False  # branded but no CTA tail (deep-dive act sub-segments)
     brand_note = None
@@ -79,6 +112,12 @@ def cmd_media(args):
             print(json.dumps({"failed_stage": name, "error": str(e)}))
             return 1
         _log(proj, f"OK    {name} ({time.time()-ts:.1f}s) {json.dumps(results[name])}")
+    if proj.data.get("profile") and not only:
+        # PDF-profile runs: post-render verification + deliverable packaging (PRD §19)
+        ts = time.time()
+        _log(proj, "START verify")
+        results["verify"] = verify.run(proj)
+        _log(proj, f"OK    verify ({time.time()-ts:.1f}s) {json.dumps(results['verify'])}")
     results["wall_clock_s"] = round(time.time() - t0, 2)
     proj.write_json(proj.work / "results.json", results)
     print("\n=== RESULTS ===")
@@ -101,6 +140,22 @@ def cmd_ingest(args):
     else:
         print("provide --pdf <path> or --url <url>")
         return 1
+
+
+def cmd_check(args):
+    r = check.run(Project.load(args.project_dir), audio=args.audio)
+    print(json.dumps(r, indent=2))
+    return 0 if r["ok"] else 2
+
+
+def cmd_eqsheet(args):
+    print(json.dumps(check.equation_sheet(Project.load(args.project_dir)), indent=2))
+
+
+def cmd_verify(args):
+    r = verify.run(Project.load(args.project_dir))
+    print(json.dumps(r, indent=2))
+    return 0 if r["ok"] else 2
 
 
 def cmd_validate(args):
@@ -155,12 +210,22 @@ def main(argv=None):
     s.add_argument("slug")
     s.add_argument("--title", default=None)
     s.add_argument("--outdir", default="outputs")
-    s.add_argument("--aspect", default="9:16", choices=list(ASPECTS))
+    s.add_argument("--profile", default=None, choices=list(profiles.PROFILES),
+                   help="production profile: brainrot (9:16 TikTok-style) | educational (16:9 lesson); sets defaults")
+    s.add_argument("--duration", default=None,
+                   help="target length: '60' (min 60, max 90), '45-90', or minutes '4-8m' (overrides profile)")
+    s.add_argument("--language", default=None,
+                   help="narration language: " + ", ".join(profiles.LANGUAGES) + " (default en-us)")
+    s.add_argument("--speed", type=float, default=None, help="narration speed multiplier (e.g. 1.2)")
+    s.add_argument("--bg-video", default=None, dest="bg_video",
+                   help="LICENSED background footage to composite under the deck (else original animated bg)")
+    s.add_argument("--music", default=None, help="licensed music bed (path) mixed low under the narration")
+    s.add_argument("--aspect", default=None, choices=list(ASPECTS), help="default 9:16 (or the profile's)")
     s.add_argument("--fps", type=int, default=30)
-    s.add_argument("--voice", default="af_heart", help="Kokoro voice (when voice-source=kokoro)")
+    s.add_argument("--voice", default=None, help="Kokoro voice (when voice-source=kokoro); default af_heart or the profile's")
     s.add_argument("--voice-source", default="kokoro", choices=["kokoro", "operator"], dest="voice_source",
                    help="kokoro = local TTS; operator = your recorded voiceover (`explainer record`)")
-    s.add_argument("--theme", default="midnight", choices=list(themes.THEMES))
+    s.add_argument("--theme", default=None, choices=list(themes.THEMES), help="default midnight (or the profile's)")
     s.add_argument("--platform", default=None, choices=list(presets.PLATFORMS),
                    help="sets aspect + safe-zone (+ min length) from a platform preset")
     s.add_argument("--aspects", default=None, help="comma list to render simultaneously, e.g. '9:16,1:1'")
@@ -197,6 +262,19 @@ def main(argv=None):
     rc.add_argument("project_dir")
     rc.add_argument("--no-open", action="store_true", help="don't auto-open the browser")
     rc.set_defaults(func=cmd_record)
+
+    ck = sub.add_parser("check", help="pre-render gate: claims vs PDF, equations, pronunciation, pacing -> review/outline.md")
+    ck.add_argument("project_dir")
+    ck.add_argument("--audio", action="store_true", help="also speak flagged terms into review/pronunciation.wav")
+    ck.set_defaults(func=cmd_check)
+
+    eq = sub.add_parser("eqsheet", help="render review/equations.png: PDF crop vs rendered LaTeX, side by side")
+    eq.add_argument("project_dir")
+    eq.set_defaults(func=cmd_eqsheet)
+
+    vf = sub.add_parser("verify", help="post-render QA (A/V+caption sync, frames, equations) + save deliverables")
+    vf.add_argument("project_dir")
+    vf.set_defaults(func=cmd_verify)
 
     va = sub.add_parser("validate", help="check the manifest is a complete handoff contract")
     va.add_argument("project_dir")

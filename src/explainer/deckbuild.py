@@ -57,6 +57,15 @@ def _font_css(theme, deck_dir):
     return out
 
 
+def _uses_math(deck):
+    for s in deck.get("slides", []):
+        if s.get("type") in ("equation", "derivation"):
+            return True
+        if any(sh.get("kind") == "math" for sh in s.get("shapes", []) or []):
+            return True
+    return False
+
+
 def run(proj):
     deck = json.loads(proj.deck_json.read_text())
     # figure images are authored relative to the project root (e.g. "sources/x.png");
@@ -78,6 +87,18 @@ def run(proj):
     # time) or "full" (legacy, whole-slide kinetic captions). Override per project via project.json.
     deck["caption_mode"] = proj.data.get("caption_mode", "window")
     deck["caption_window"] = int(proj.data.get("caption_window", 4))
+    # PDF-profile render options (PRD §19). All absent -> the engine behaves exactly as before.
+    d = proj.data
+    if d.get("caption_style"):
+        deck["caption_style"] = d["caption_style"]          # brainrot | lecture
+    if d.get("bg_video"):
+        deck["bg_video"] = True                              # transparent page; ffmpeg composites footage under it
+    elif d.get("bg_fx"):
+        deck["bg_fx"] = d["bg_fx"]                           # "procedural" original animated background
+    if d.get("profile") == "brainrot":
+        deck.setdefault("flash", d.get("flash", True))       # white flash frame on each cut
+        deck.setdefault("kenburns", d.get("kenburns", True))  # slow push-in: no frozen shots
+        deck.setdefault("intro_s", d.get("intro_s", 0.28))   # snappier intros
 
     # branding: watermark on every slide + an auto-appended CTA end slide (assets are
     # project-relative, e.g. "brand/logo.png"; the deck lives one level down in deck/).
@@ -113,6 +134,15 @@ def run(proj):
             .replace("{{CSS}}", css)
             .replace("{{DECK_JSON}}", json.dumps(deck))
             .replace("{{ENGINE}}", engine))
+    if _uses_math(deck):
+        # vendored MathJax 3 (SVG output, all TeX extensions bundled -> no runtime fetches);
+        # copied next to the deck so deck/ stays a standalone, offline artifact.
+        (proj.deck_dir / "mathjax").mkdir(exist_ok=True)
+        shutil.copy(ASSETS / "mathjax" / "tex-svg-full.js", proj.deck_dir / "mathjax" / "tex-svg-full.js")
+        cfg = ("<script>window.MathJax={startup:{typeset:false},svg:{fontCache:'local'},"
+               "options:{enableMenu:false,enableAssistiveMml:false}};</script>"
+               "<script src=\"mathjax/tex-svg-full.js\"></script>\n")
+        html = html.replace("<script>window.DECK", cfg + "<script>window.DECK", 1)
     out = proj.deck_dir / "index.html"
     out.write_text(html)
     return {"slides": len(deck.get("slides", [])), "deck_html": str(out.relative_to(proj.dir))}

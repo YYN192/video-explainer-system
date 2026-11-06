@@ -21,10 +21,29 @@ def _mux_one(proj, aspect, fps):
     # add the audio track and copy the video through — no re-encode, tiny memory footprint.
     vsrc = proj.work / f"video_{label}.mp4"
     music = _music_path(proj)
+    sfx_track = None
+    if proj.data.get("sfx"):
+        from .sfx import build_track
+        sfx_track = build_track(proj)
     cmd = ["ffmpeg", "-hide_banner", "-y",
            "-i", str(vsrc),
            "-i", str(proj.work / "narration.wav")]
-    if music:
+    if sfx_track:
+        # PDF profiles: narration + generated SFX (+ optional music bed). normalize=0 keeps the
+        # narration at its -14 LUFS level (amix would otherwise divide it by the input count);
+        # a limiter catches peaks where an effect lands on a loud word.
+        cmd += ["-i", str(sfx_track)]
+        chains, mix = [], "[1:a][2:a]"
+        if music:
+            gain = float(proj.data.get("music_gain", 0.16))
+            cmd += ["-i", music]
+            chains.append(f"[3:a]aloop=loop=-1:size=2000000000,volume={gain}[bed]")
+            mix += "[bed]"
+        n_in = 3 if music else 2
+        chains.append(f"{mix}amix=inputs={n_in}:duration=first:dropout_transition=0:normalize=0,"
+                      f"alimiter=limit=0.95[a]")
+        cmd += ["-filter_complex", ";".join(chains), "-map", "0:v", "-map", "[a]"]
+    elif music:
         gain = float(proj.data.get("music_gain", 0.16))  # low bed under narration
         cmd += ["-i", music, "-filter_complex",
                 f"[2:a]aloop=loop=-1:size=2000000000,volume={gain}[bed];"

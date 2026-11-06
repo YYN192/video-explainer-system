@@ -314,3 +314,102 @@ body[data-theme="fwf"]::after {
 /* secondary text (subtitles / footer feel) leans to the #CCCCCC tone via opacity on white */
 [data-theme="fwf"] #caption .w { color: #CCCCCC; }
 [data-theme="fwf"] #caption .w.active { color: var(--accent); }
+
+/* ============================================================
+   PDF profiles (PRD §19): math devices, scene2d diagrams, meme cards,
+   provenance badges, BRAINROT / LECTURE caption styles + backgrounds.
+   Still NO CSS animation/transition — every motion is set by renderAt(t).
+   ============================================================ */
+.tex { display: inline-block; line-height: 0; }
+.tex mjx-container { margin: 0 !important; }
+.tex svg { overflow: visible; }
+
+/* equation: display formula + symbol legend */
+.eqmain { width: 100%; max-width: 86vw; font-size: 8.2vmin; text-align: center; color: var(--fg); }
+.eqlabel { margin-top: 2.2vmin; font-size: 3.1vmin; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; }
+.eqlegend { margin-top: 4vmin; display: flex; flex-direction: column; gap: 1.6vmin; align-items: stretch;
+  min-width: 52vmin; max-width: 86vw; }
+.eqrow { display: flex; align-items: center; gap: 3vmin; padding: 1.2vmin 2.4vmin; border-radius: 1.4vmin;
+  background: color-mix(in srgb, var(--fg) 6%, transparent); border-left: .7vmin solid var(--hair-strong); }
+.eqrow.now { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.eqsym { min-width: 10vmin; text-align: center; font-size: 4.6vmin; color: var(--accent2); }
+.eqmean { font-size: 3.4vmin; line-height: 1.3; text-align: left; }
+.equnit { opacity: .7; }
+
+/* derivation: stacked steps, current step marked */
+.deriv { display: flex; flex-direction: column; gap: 2.2vmin; width: 100%; max-width: min(88vw, 150vmin); }
+.drow { display: flex; align-items: center; gap: 3vmin; padding: 1.2vmin 2.6vmin; border-radius: 1.4vmin;
+  border-left: .7vmin solid transparent; }
+.drow.now { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.dmath { flex: 1; width: 100%; font-size: 6vmin; text-align: left; }
+.dnote { font-size: 3vmin; opacity: .8; max-width: 38%; text-align: right; line-height: 1.3; }
+
+/* scene2d: declarative animated SVG diagram */
+.scene { width: 88vw; max-height: 64vh; overflow: visible; }
+.scene-text { font-family: var(--font-body, inherit); font-weight: 600; }
+.scene-math { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+
+/* meme card (original text + emoji, no third-party images) */
+.meme { display: flex; flex-direction: column; align-items: center; gap: 3vmin; }
+.meme-setup { font-size: 5.6vmin; font-weight: 800; opacity: .9; }
+.meme-emoji { font-size: 22vmin; line-height: 1; }
+.meme-punch { font-size: 8vmin; font-weight: 900; line-height: 1.05; }
+
+/* provenance badge (claim from the PDF vs supplementary explanation) */
+.pgbadge { position: absolute; top: 3.4vmin; left: 3.4vmin; z-index: 3; padding: .9vmin 1.8vmin;
+  border-radius: 99px; font-size: 2.4vmin; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.pgbadge.src { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--fg);
+  border: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); }
+.pgbadge.supp { background: color-mix(in srgb, var(--accent2) 18%, transparent); color: var(--fg);
+  border: 2px dashed color-mix(in srgb, var(--accent2) 75%, transparent); }
+
+/* procedural background (BRAINROT) */
+#fx { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.fx-stripes { position: absolute; inset: -40%; opacity: .10;
+  background: repeating-linear-gradient(90deg, var(--accent) 0 40px, transparent 40px 120px); }
+.fx-shape { position: absolute; left: 0; top: 0; opacity: .22; font-weight: 900; line-height: 1; }
+.fx-shape.a1 { color: var(--accent); } .fx-shape.a2 { color: var(--accent2); } .fx-shape.fg { color: var(--fg); opacity: .12; }
+#scrim { position: fixed; inset: 0; z-index: 0; background: rgba(0,0,0,.52); }
+#flash { position: fixed; inset: 0; z-index: 4; background: #fff; opacity: 0; pointer-events: none; }
+
+/* captions — BRAINROT: huge, outlined, uppercase, 1–2 words at a time */
+#caption.cap-brainrot { gap: 8px 28px; z-index: 5; }
+#caption.cap-brainrot .w { font-weight: 900; font-stretch: 82%; text-transform: uppercase; color: #fff;
+  -webkit-text-stroke: .085em #000; paint-order: stroke fill; letter-spacing: .01em;
+  text-shadow: 0 .07em 0 rgba(0,0,0,.9); line-height: 1.02; }
+#caption.cap-brainrot .w.active { color: var(--accent2); }
+#caption.cap-brainrot .w[data-sym] { text-transform: none; }
+/* captions — LECTURE: quiet subtitle line */
+#caption.cap-lecture { gap: 4px 12px; z-index: 5; left: 12vw; right: 12vw; }
+#caption.cap-lecture .w { font-weight: 500; color: color-mix(in srgb, var(--fg) 88%, transparent);
+  text-shadow: 0 2px 10px rgba(0,0,0,.8); }
+#caption.cap-lecture .w.active { color: var(--accent); }
+
+/* BRAINROT theme typography: condensed black display, outlined headlines */
+body[data-theme="brainrot"] .headline, body[data-theme="brainrot"] .punch, body[data-theme="brainrot"] .statnum,
+body[data-theme="brainrot"] .meme-punch, body[data-theme="brainrot"] .def-term, body[data-theme="brainrot"] .cmpval {
+  font-weight: 900; font-stretch: 78%; letter-spacing: -.005em;
+  -webkit-text-stroke: .03em #000; paint-order: stroke fill; text-shadow: 0 .06em 0 rgba(0,0,0,.6); }
+/* uppercase ONLY on word-only devices. Never on numbers/terms: "3 m" must not become "3 M"
+   (megametres) — units and symbols are case-sensitive. */
+body[data-theme="brainrot"] .headline, body[data-theme="brainrot"] .punch,
+body[data-theme="brainrot"] .meme-punch { text-transform: uppercase; }
+/* 9:16 legibility: secondary text scaled up from the deck defaults */
+body[data-theme="brainrot"] .def-body, body[data-theme="brainrot"] .statlabel,
+body[data-theme="brainrot"] .subkicker { font-size: 4.6vmin; line-height: 1.25; }
+body[data-theme="brainrot"] .li-text, body[data-theme="brainrot"] .li-num { font-size: 6.4vmin; }
+body[data-theme="brainrot"] .cmptitle { font-size: 4.4vmin; }
+body[data-theme="brainrot"] .cmpval { font-size: 7.6vmin; }
+body[data-theme="brainrot"] .eqmain { font-size: 15vmin; }
+body[data-theme="brainrot"] .eqsym { font-size: 7vmin; }
+body[data-theme="brainrot"] .eqmean { font-size: 5.4vmin; }
+body[data-theme="brainrot"] .meme-setup { font-size: 6.4vmin; }
+body[data-theme="brainrot"] .kicker { color: var(--accent2); font-stretch: 85%; }
+/* LECTURE theme: serif titles, calmer weights, chalkboard grid */
+body[data-theme="lecture"] .headline { font-weight: 600; letter-spacing: -.01em; }
+body[data-theme="lecture"] .slidetitle { font-weight: 600; font-size: 5.2vmin; }
+body[data-theme="lecture"] #stage { background-image:
+  linear-gradient(color-mix(in srgb, var(--fg) 4%, transparent) 1px, transparent 1px),
+  linear-gradient(90deg, color-mix(in srgb, var(--fg) 4%, transparent) 1px, transparent 1px);
+  background-size: 6vmin 6vmin; }

@@ -25,9 +25,17 @@ THEMES = {
     # glow (the kit forbids gradients except the vignette). Pair with the FFW brand.
     "fwf":      {"bg": "#36185B", "fg": "#FFFFFF", "accent": "#757BBD", "accent2": "#757BBD", "motion": "fade",
                  "ambient": False, "fonts": {"display": "Archivo", "body": "Archivo"}},
+    # BRAINROT profile: near-black bg, hot magenta + acid-lime, heavy condensed Archivo,
+    # punchy default intro. Scoped CSS in `[data-theme="brainrot"]` (outlined display type).
+    "brainrot": {"bg": "#0a0612", "fg": "#ffffff", "accent": "#ff2bd6", "accent2": "#c6ff1a", "motion": "zoom",
+                 "ambient": False, "fonts": {"display": "Archivo", "body": "Archivo"}},
+    # EDUCATIONAL profile: deep slate "blackboard", chalk-white text, calm blue + amber.
+    # Fraunces display (titles) + Inter body; equations render via MathJax in fg colour.
+    "lecture":  {"bg": "#0f1720", "fg": "#eef2f6", "accent": "#6cb4ff", "accent2": "#ffb547", "motion": "fade",
+                 "fonts": {"display": "Fraunces", "body": "Inter"}},
 }
 DEFAULT = "midnight"
-VALID_MOTION = {"rise", "fade", "pop", "slide"}
+VALID_MOTION = {"rise", "fade", "pop", "slide", "zoom", "spin", "whip", "glitch", "drop", "wipe"}
 
 
 def resolve(spec):
